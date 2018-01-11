@@ -124,7 +124,7 @@ def find_lines(image):
     # Choose the number of sliding windows
     nwindows = 9
     # Set the width of the windows +/- margin
-    margin = 70
+    margin = 90
     # Set minimum number of pixels found to recenter window
     minpix = 100
 
@@ -212,7 +212,7 @@ def find_lines(image):
         out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
         out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
 
-        return out_img, ploty, left_fit, right_fit, left_fitx, right_fitx
+        return out_img, ploty, left_fit, right_fit, left_fitx, right_fitx, leftx, lefty, rightx, righty
 
     def fit_window(image, left_fit, right_fit):
         # The polynomial fit is already detected on the last frame
@@ -268,7 +268,7 @@ def find_lines(image):
         cv2.fillPoly(window_img, np.int_([right_line_pts]), (0, 255, 0))
         out_img = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
 
-        return out_img, ploty, left_fit, right_fit, left_fitx, right_fitx
+        return out_img, ploty, left_fit, right_fit, left_fitx, right_fitx, leftx, lefty, rightx, righty
     
     def draw_calculate(image, ploty, left_fitx, right_fitx):
         # Draw the fitted lines
@@ -303,7 +303,7 @@ def find_lines(image):
 
         return out_img, ploty, left_fitx, right_fitx, radius_of_curvature, car_pos
 
-    def sanity_check(ploty, left_fit, right_fit, left_fitx, right_fitx, left_line, right_line):
+    def sanity_check(ploty, fit, fitx, x, y, line):
         # if np.sum(np.absolute(left_fitx - left_line.recent_xfitted[-1])) > 1000:
         #     return False
         # if np.sum(np.absolute(right_fitx - right_line.recent_xfitted[-1])) > 1000:
@@ -321,10 +321,22 @@ def find_lines(image):
         # if right_fit_diff[1] > 2:
         #     return False
 
+        # The A coefficient does not jump wildly
+        # if len(line.recent_fit)==5 and abs(fit[0] - sum(list(zip(*line.recent_fit))[0])/5) > 0.00035:
+        #     return False
+        if not np.any(x[y<360]):
+            return False
+
+        return True
+
+    def sanity_check_both(ploty, left_fit, right_fit, left_fitx, right_fitx, left_line, right_line):
+
+        # The distance between the detected lines is reasonable
         if np.absolute(np.absolute(np.mean(left_fitx - right_fitx)) - (TRANSFORM_DEST_POINT[1][0] - TRANSFORM_DEST_POINT[0][0])) > 100:
             return False
 
         return True
+
 
     if LEFT_LINE is None:
         # Create line objects to hold recent data
@@ -332,52 +344,83 @@ def find_lines(image):
         RIGHT_LINE = Line()
 
         # Perform sliding window to detect line
-        out_img, ploty, left_fit, right_fit, left_fitx, right_fitx = sliding_window(image)
+        out_img, ploty, left_fit, right_fit, left_fitx, right_fitx, _, _, _, _ = sliding_window(image)
 
         # Update the line objects
         LEFT_LINE.detected = True
-        LEFT_LINE.recent_xfitted.append(left_fitx)
-        LEFT_LINE.current_fit = left_fit
-        LEFT_LINE.fit_average = left_fit
+        LEFT_LINE.recent_xfit.append(left_fitx)
+        LEFT_LINE.recent_fit.append(left_fit)
 
         RIGHT_LINE.detected = True
-        RIGHT_LINE.recent_xfitted.append(right_fitx)
-        RIGHT_LINE.current_fit = right_fit
-        RIGHT_LINE.fit_average = right_fit
+        RIGHT_LINE.recent_xfit.append(right_fitx)
+        RIGHT_LINE.recent_fit.append(right_fit)
 
     else:
         # Perform fit window to detect line
-        out_img, ploty, left_fit, right_fit, left_fitx, right_fitx = fit_window(image, LEFT_LINE.current_fit, RIGHT_LINE.current_fit)
+        out_img, ploty, left_fit, right_fit, left_fitx, right_fitx, leftx, lefty, rightx, righty = fit_window(image, LEFT_LINE.recent_fit[-1], RIGHT_LINE.recent_fit[-1])
         
-        if not sanity_check(ploty, left_fit, right_fit, left_fitx, right_fitx, LEFT_LINE, RIGHT_LINE):
+        left_sane = sanity_check(ploty, left_fit, left_fitx, leftx, lefty, LEFT_LINE)
+        right_sane = sanity_check(ploty, right_fit, right_fitx, rightx, righty, RIGHT_LINE)
+
+        if left_sane and not right_sane:
+            right_fit = list(left_fit)
+            right_fit[2] += (TRANSFORM_DEST_POINT[1][0] - TRANSFORM_DEST_POINT[0][0])
+            RIGHT_LINE.detected = False
+            LEFT_LINE.detected = True
+        
+        if not left_sane and right_sane:
+            left_fit = list(right_fit)
+            left_fit[2] -= (TRANSFORM_DEST_POINT[1][0] - TRANSFORM_DEST_POINT[0][0])
+            LEFT_LINE.detected = False
+            RIGHT_LINE.detected = True
+
+        if (not left_sane and not right_sane) or not sanity_check_both(ploty, left_fit, right_fit, left_fitx, right_fitx, LEFT_LINE, RIGHT_LINE):
             # # Perform sliding window to detect line
             # out_img, ploty, left_fit, right_fit, left_fitx, right_fitx = sliding_window(image)
-            left_fit = LEFT_LINE.current_fit
-            right_fit = RIGHT_LINE.current_fit
-            left_fitx = LEFT_LINE.recent_xfitted[-1]
-            right_fitx = RIGHT_LINE.recent_xfitted[-1]
+            left_fit = LEFT_LINE.recent_fit[-1]
+            right_fit = RIGHT_LINE.recent_fit[-1]
+            left_fitx = LEFT_LINE.recent_xfit[-1]
+            right_fitx = RIGHT_LINE.recent_xfit[-1]
 
-            LEFT_LINE.detected = True
-            RIGHT_LINE.detected = True
-        
-        else:
             LEFT_LINE.detected = False
             RIGHT_LINE.detected = False
+        
+        else:
+            LEFT_LINE.detected = True
+            RIGHT_LINE.detected = True
 
         # Update the line objects
-        LEFT_LINE.recent_xfitted.append(left_fitx)
-        LEFT_LINE.current_fit = left_fit
-        LEFT_LINE.fit_average = (4*LEFT_LINE.fit_average + left_fit)/5
+        if len(LEFT_LINE.recent_xfit) == LEFT_LINE.n:
+            LEFT_LINE.recent_xfit.pop(0)
+        LEFT_LINE.recent_xfit.append(left_fitx)
+        if len(LEFT_LINE.recent_fit) == LEFT_LINE.n:
+            LEFT_LINE.recent_fit.pop(0)
+        LEFT_LINE.recent_fit.append(left_fit)
         
-        RIGHT_LINE.recent_xfitted.append(right_fitx)
-        RIGHT_LINE.current_fit = right_fit
-        RIGHT_LINE.fit_average = (4*RIGHT_LINE.fit_average + right_fit)/5
+        if len(RIGHT_LINE.recent_xfit) == RIGHT_LINE.n:
+            RIGHT_LINE.recent_xfit.pop(0)
+        RIGHT_LINE.recent_xfit.append(right_fitx)
+        if len(RIGHT_LINE.recent_fit) == RIGHT_LINE.n:
+            RIGHT_LINE.recent_fit.pop(0)
+        RIGHT_LINE.recent_fit.append(right_fit)
+    
+    # # Draw the polynomial coefficients
+    # font = cv2.FONT_HERSHEY_SIMPLEX
+    # cv2.putText(out_img,'Left A=' + '{0:.5f}'.format(left_fit[0]), (50,70), font, 1, (255,255,255),1,cv2.LINE_AA)
+    # cv2.putText(out_img,'Left B=' + '{0:.5f}'.format(left_fit[1]), (50,120), font, 1, (255,255,255),1,cv2.LINE_AA)
+    # cv2.putText(out_img,'Left C=' + '{0:.5f}'.format(left_fit[2]), (50,170), font, 1, (255,255,255),1,cv2.LINE_AA)
+    
+    # cv2.putText(out_img,'Right A=' + '{0:.5f}'.format(right_fit[0]), (50,220), font, 1, (255,255,255),1,cv2.LINE_AA)
+    # cv2.putText(out_img,'Right B=' + '{0:.5f}'.format(right_fit[1]), (50,270), font, 1, (255,255,255),1,cv2.LINE_AA)
+    # cv2.putText(out_img,'Right C=' + '{0:.5f}'.format(right_fit[2]), (50,320), font, 1, (255,255,255),1,cv2.LINE_AA)
 
     return draw_calculate(out_img, ploty, left_fitx, right_fitx)
 
 # Define a class to receive the characteristics of each line detection
 class Line():
     def __init__(self):
+        # number of history data
+        self.n = 5
         # was the line detected in the last iteration?
         self.detected = False  
         #x values for detected line pixels
@@ -385,12 +428,10 @@ class Line():
         #y values for detected line pixels
         #self.ally = None
         # x values of the last n fits of the line
-        self.recent_xfitted = [] 
+        self.recent_xfit = [] 
 
-        #polynomial coefficients averaged over the last n iterations
-        self.fit_average = None  
-        #polynomial coefficients for the most recent fit
-        self.current_fit = [np.array([False])]  
+        #polynomial coefficients of the last n fits of the line
+        self.recent_fit = [] 
         #difference in polynomial coefficients between last and new fits
         #self.diffs = np.array([0,0,0], dtype='float') 
         #radius of curvature of the line in some units
@@ -404,9 +445,9 @@ def draw_detection(undist, warped, Minv, ploty, left_fitx, right_fitx, radius_of
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
 
     # Recast the x and y points into usable format for cv2.fillPoly()
-    left_fitx = left_fitx[50:]
-    right_fitx = right_fitx[50:]
-    ploty = ploty[50:]
+    # left_fitx = left_fitx[50:]
+    # right_fitx = right_fitx[50:]
+    # ploty = ploty[50:]
     pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
     pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
     pts = np.hstack((pts_left, pts_right))
@@ -486,15 +527,15 @@ if __name__ == '__main__':
     #     # Save the image
     #     cv2.imwrite(image_path.replace('test_images','test_images_output').replace('.jpg', '')+'_detected.jpg', cv2.cvtColor(detected_lane_image, cv2.COLOR_RGB2BGR))
 
-    # process test video(s)
-    video = VideoFileClip("project_video.mp4")
-    #video.save_frame("frame.jpg", t=21.2) # saves the frame a t=2s
-    detected_lane_video = video.fl_image(detect_lane) #NOTE: this function expects color images!!
-    detected_lane_video.write_videofile("project_video_detected.mp4", audio=False)
+    # # process test video(s)
+    # video = VideoFileClip("project_video.mp4")
+    # #video.save_frame("frame.jpg", t=21.2) # saves the frame a t=2s
+    # detected_lane_video = video.fl_image(detect_lane) #NOTE: this function expects color images!!
+    # detected_lane_video.write_videofile("project_video_detected.mp4", audio=False)
 
-    # img_path = 'test_images/frame.jpg'
-    # img = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
-    # detect_lane(img, img_path)
+    img_path = 'test_images/straight_lines1.jpg'
+    img = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
+    detect_lane(img, img_path)
     # img_path = 'test_images/test5.jpg'
     # img = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
     # detect_lane(img, img_path)
