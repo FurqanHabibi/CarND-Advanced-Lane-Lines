@@ -533,9 +533,9 @@ if __name__ == '__main__':
     # detected_lane_video = video.fl_image(detect_lane) #NOTE: this function expects color images!!
     # detected_lane_video.write_videofile("project_video_detected.mp4", audio=False)
 
-    img_path = 'test_images/straight_lines1.jpg'
+    img_path = 'test_images/test2.jpg'
     img = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
     detect_lane(img, img_path)
-    # img_path = 'test_images/test5.jpg'
-    # img = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
-    # detect_lane(img, img_path)
+    img_path = 'test_images/test2.jpg'
+    img = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
+    detect_lane(img, img_path)
